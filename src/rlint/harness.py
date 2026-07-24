@@ -42,8 +42,13 @@ class AttackerSpec:
 
 
 def adapt_attackers(items: Iterable[object]) -> list[AttackerSpec]:
-    """Accept anything that looks like an attacker: an `AttackerSpec`, a registry entry
-    with `.id`/`.exploit_class`, or a bare decorated function."""
+    """Accept anything attacker-shaped.
+
+    Track B's `AttackerMeta` (`attacker_id`, `exploit_class`, `description`, `fn`), a bare
+    decorated function, or an `AttackerSpec`. `exploit_class` passes through untouched:
+    the honest control is labelled "E0" and only `None` means unlabeled, which is the
+    distinction Track C's recall accounting depends on.
+    """
     adapted: list[AttackerSpec] = []
     for item in items:
         if isinstance(item, AttackerSpec):
@@ -52,9 +57,14 @@ def adapt_attackers(items: Iterable[object]) -> list[AttackerSpec]:
         fn = getattr(item, "fn", None) or item
         if not callable(fn):
             raise TypeError(f"not an attacker: {item!r}")
+        identifier = (
+            getattr(item, "attacker_id", None)
+            or getattr(item, "id", None)
+            or getattr(fn, "__name__", "attacker")
+        )
         adapted.append(
             AttackerSpec(
-                id=str(getattr(item, "id", None) or getattr(fn, "__name__", "attacker")),
+                id=str(identifier),
                 fn=fn,  # type: ignore[arg-type]
                 exploit_class=getattr(item, "exploit_class", None)
                 or getattr(fn, "exploit_class", None),
@@ -64,6 +74,16 @@ def adapt_attackers(items: Iterable[object]) -> list[AttackerSpec]:
             )
         )
     return adapted
+
+
+def attackers_from_registry(registry: dict[str, object] | None = None) -> list[AttackerSpec]:
+    """Every registered attacker, control first so the report reads top-down."""
+    if registry is None:
+        from rlint.attackers.base import REGISTRY
+
+        registry = REGISTRY  # type: ignore[assignment]
+    specs = adapt_attackers(list(registry.values()))  # type: ignore[union-attr]
+    return sorted(specs, key=lambda s: (s.exploit_class or "zz"))
 
 
 @dataclass
