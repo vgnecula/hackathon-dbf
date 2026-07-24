@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import shutil
 import subprocess
 from dataclasses import FrozenInstanceError
@@ -112,6 +113,22 @@ def test_fixture_specs_are_exactly_the_three_dg_envs() -> None:
         assert all(path.startswith("tests/heldout/") for path in spec.heldout_tests)
         assert not (set(spec.visible_tests) & set(spec.heldout_tests))
         assert scripted.load_reference_solution(spec.env_id)["src/solution.py"].strip()
+
+
+def _count_test_functions(files: dict[str, str]) -> int:
+    return sum(
+        1
+        for content in files.values()
+        for node in ast.parse(content).body
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+    )
+
+
+@pytest.mark.parametrize("env_id", ["csv_stats", "string_utils", "json_parser"])
+def test_fixture_test_counts_match_dg_plan(env_id: str) -> None:
+    spec = scripted.load_fixture_spec(env_id)
+    assert _count_test_functions(spec.visible_tests) == 4
+    assert _count_test_functions(spec.heldout_tests) == 6
 
 
 @pytest.mark.parametrize("env_id", ["missing", "../csv_stats", "csv_stats/../json_parser"])
