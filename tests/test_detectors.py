@@ -612,8 +612,12 @@ def test_dashboard_rejects_unknown_and_traversal_paths():
     assert asset_for_path("/../report.py") is None
 
 
-def test_dashboard_is_bootstrapped_from_the_product_report():
-    payload = product_payload()
+def test_dashboard_is_bootstrapped_from_the_product_report(monkeypatch):
+    # Pin the fake backend so this stays a fast, Docker-free wiring test. The dashboard
+    # defaults to the real (local) backend in production; that default is exercised
+    # separately and must not drag Docker into the unit suite.
+    monkeypatch.setenv("RLINT_DASHBOARD_BACKEND", "fake")
+    payload = product_payload(force=True)
     console, _ = dashboard_asset_for_path("/console")
 
     assert payload["env_id"] == "csv_stats"
@@ -623,6 +627,19 @@ def test_dashboard_is_bootstrapped_from_the_product_report():
     assert payload["runtime"]["sandboxes_created"] == 18
     assert b"window.__RLINT_DATA__=" in console
     assert b'"env_id":"csv_stats"' in console
+
+
+def test_dashboard_defaults_to_a_real_backend(monkeypatch):
+    # The whole point of the dashboard fix: it must not silently run on fake, which
+    # misreports recall as 6/8. RLINT_SANDBOX (often pinned to fake in dev) must not leak in.
+    from rlint.detectors.dashboard.server import _dashboard_backend
+
+    monkeypatch.delenv("RLINT_DASHBOARD_BACKEND", raising=False)
+    monkeypatch.setenv("RLINT_SANDBOX", "fake")
+    assert _dashboard_backend() == "local"
+
+    monkeypatch.setenv("RLINT_DASHBOARD_BACKEND", "daytona")
+    assert _dashboard_backend() == "daytona"
 
 
 # --------------------------------------------------------------------------------------
