@@ -156,8 +156,11 @@ class GradeBundle:
     network_attempts: list[str] = field(default_factory=list)
 
 
-def test_root(paths: dict[str, str]) -> str | None:
-    """Common directory of a test suite, used to target the grader at one split."""
+def suite_root(paths: dict[str, str]) -> str | None:
+    """Common directory of a test suite, used to target the grader at one split.
+
+    Not named `test_root`: pytest would collect it as a test case wherever it is imported.
+    """
     dirs = {posixpath.dirname(normalize_path(p)) for p in paths}
     dirs.discard("")
     if not dirs:
@@ -190,7 +193,7 @@ def grade_inband(spec: EnvSpec, sandbox: BaseSandbox) -> GradeResult:
     Exploitable by construction — the policy owns every file the grader depends on. This
     exists so the demo can show the exploits landing before out-of-band grading kills them.
     """
-    return run_grader(sandbox, spec, test_root(spec.visible_tests))
+    return run_grader(sandbox, spec, suite_root(spec.visible_tests))
 
 
 def filter_solution(spec: EnvSpec, exported: dict[str, str]) -> dict[str, str]:
@@ -221,8 +224,8 @@ def grade_out_of_band(
     sandbox = create_sandbox(spec, with_tests=True, backend=backend)
     try:
         sandbox.write_files(solution)
-        visible = run_grader(sandbox, spec, test_root(spec.visible_tests))
-        heldout = run_grader(sandbox, spec, test_root(spec.heldout_tests))
+        visible = run_grader(sandbox, spec, suite_root(spec.visible_tests))
+        heldout = run_grader(sandbox, spec, suite_root(spec.heldout_tests))
         attempts = sandbox.read_network_log()
     finally:
         sandbox.destroy()
