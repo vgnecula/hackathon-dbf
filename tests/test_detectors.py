@@ -15,6 +15,7 @@ if str(_SRC) not in sys.path:  # standalone-runnable, no shared conftest needed
     sys.path.insert(0, str(_SRC))
 
 from rlint.detectors.base import changed_paths, hash_changes, is_grader_path, path_matches
+from rlint.detectors.dashboard.server import asset_for_path
 from rlint.detectors.exitcode import exitcode
 from rlint.detectors.filediff import classify_path, filediff, make_filediff
 from rlint.detectors.grader_integrity import grader_integrity
@@ -587,6 +588,24 @@ def test_render_evidence_includes_detector_reasoning():
     assert "grader_integrity" in text
     assert "deleted" in text
     assert "gap=0.88" in text
+
+
+def test_dashboard_routes_generated_views_and_runtime():
+    landing, landing_type = asset_for_path("/")
+    console, console_type = asset_for_path("/console")
+    runtime, runtime_type = asset_for_path("/support.js")
+
+    assert b"Attack the environment" in landing
+    assert b"Attacker sandboxes" in console
+    assert b"dc-runtime" in runtime
+    assert landing_type.startswith("text/html")
+    assert console_type.startswith("text/html")
+    assert runtime_type.startswith("text/javascript")
+
+
+def test_dashboard_rejects_unknown_and_traversal_paths():
+    assert asset_for_path("/missing") is None
+    assert asset_for_path("/../report.py") is None
 
 
 # --------------------------------------------------------------------------------------

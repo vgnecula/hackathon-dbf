@@ -14,14 +14,16 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Sequence
+from collections.abc import Sequence
 
 from .detectors.registry import (
     CONTROL_CLASS,
     Coverage,
     build_report,
-    coverage as compute_coverage,
     default_detectors,
+)
+from .detectors.registry import (
+    coverage as compute_coverage,
 )
 from .models import Report, Rollout
 
@@ -262,8 +264,12 @@ def demo_rollouts() -> list[Rollout]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="rlint.report", description=__doc__)
     parser.add_argument("--demo", action="store_true", help="render the synthetic suite")
+    parser.add_argument("--web", action="store_true", help="open the interactive dashboard")
     parser.add_argument("--evidence", action="store_true", help="show detector evidence")
     parser.add_argument("--grading", default="inband", choices=("inband", "oob"))
+    parser.add_argument("--host", default="127.0.0.1", help="dashboard bind host")
+    parser.add_argument("--port", type=int, default=8765, help="dashboard bind port")
+    parser.add_argument("--no-open", action="store_true", help="do not open a browser")
     parser.add_argument(
         "--no-network-detector",
         action="store_true",
@@ -271,8 +277,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.web:
+        from .detectors.dashboard import serve
+
+        serve(host=args.host, port=args.port, open_browser=not args.no_open)
+        return 0
+
     if not args.demo:
-        parser.error("only --demo is available until the harness lands")
+        parser.error("choose --demo for the terminal report or --web for the dashboard")
 
     suite = default_detectors()
     if args.no_network_detector:
