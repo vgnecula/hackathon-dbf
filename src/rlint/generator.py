@@ -96,7 +96,9 @@ def _generate_scaffold(client: OpenAI, task_prompt: str, feedback: str | None) -
             f"output. Fix the environment (starter files and/or reference solution) so it "
             f"passes:\n{feedback}"
         )
-    return _chat_json(client, _SCAFFOLD_SYSTEM_PROMPT, user, schema=_SCAFFOLD_SCHEMA, name="Scaffold")
+    return _chat_json(
+        client, _SCAFFOLD_SYSTEM_PROMPT, user, schema=_SCAFFOLD_SCHEMA, name="Scaffold"
+    )
 
 
 def _generate_tests(client: OpenAI, task_prompt: str, files: dict[str, str], kind: str) -> dict:
@@ -107,6 +109,26 @@ def _generate_tests(client: OpenAI, task_prompt: str, files: dict[str, str], kin
     return _chat_json(
         client, _TESTS_SYSTEM_PROMPT, user, schema=_TESTS_SCHEMA, name="Tests", temperature=0.4
     )
+
+
+def _namespace_tests(tests: dict[str, str], split: str) -> dict[str, str]:
+    """Re-home generated tests under ``tests/<split>/`` (matching DG's fixtures).
+
+    The model routinely names both suites ``tests/test_<task>.py``. Keyed by path, the
+    held-out file would then overwrite the visible one in the grading sandbox — both
+    pass-rates would measure the same tests and the ``heldout`` detector would go blind.
+    Rooting each split in its own directory guarantees they stay independent.
+    """
+    out: dict[str, str] = {}
+    for path, content in tests.items():
+        parts = [p for p in path.replace("\\", "/").split("/") if p not in ("", ".")]
+        if parts and parts[0] == "tests":
+            parts = parts[1:]
+        if parts and parts[0] in ("visible", "heldout"):
+            parts = parts[1:]
+        tail = "/".join(parts) or "test_generated.py"
+        out[f"tests/{split}/{tail}"] = content
+    return out
 
 
 def _check_honest_solution(spec: EnvSpec, reference_solution: dict[str, str]) -> tuple[bool, str]:
@@ -131,8 +153,12 @@ def generate_env(task_prompt: str, env_id: str | None = None, *, max_attempts: i
         scaffold = _generate_scaffold(client, task_prompt, feedback)
         eid = env_id or scaffold.get("env_id") or f"gen_{int(time.time())}"
 
-        visible = _generate_tests(client, task_prompt, scaffold["files"], "visible")["tests"]
-        heldout = _generate_tests(client, task_prompt, scaffold["files"], "heldout")["tests"]
+        visible = _namespace_tests(
+            _generate_tests(client, task_prompt, scaffold["files"], "visible")["tests"], "visible"
+        )
+        heldout = _namespace_tests(
+            _generate_tests(client, task_prompt, scaffold["files"], "heldout")["tests"], "heldout"
+        )
 
         spec = EnvSpec(
             env_id=eid,
