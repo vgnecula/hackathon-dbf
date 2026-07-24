@@ -35,12 +35,42 @@ def asset_for_path(path: str) -> tuple[bytes, str] | None:
 
 
 def product_payload() -> dict[str, object]:
-    """Run the real detector registry over the canonical product rollouts."""
-    from ...report import demo_rollouts
+    """Run the full product pipeline on the key-free fake sandbox backend."""
+    from ...attackers.scripted import load_fixture_spec, registered_attackers
+    from ...harness import run_suite
     from ..registry import build_report
 
-    rollouts = demo_rollouts()
-    return report_payload(build_report("csv_stats", rollouts))
+    spec = load_fixture_spec("csv_stats")
+    attackers = registered_attackers()
+    suite = run_suite(
+        spec,
+        attackers,
+        backend="fake",
+        grading="inband",
+        max_parallel=len(attackers),
+    )
+    payload = report_payload(build_report(suite.env_id, suite.rollouts))
+    payload["runtime"] = {
+        "backend": suite.backend,
+        "grading": suite.grading,
+        "wall_time_s": suite.wall_time_s,
+        "serial_time_s": suite.serial_time_s,
+        "max_parallel": suite.max_parallel,
+        "sandboxes_created": suite.sandboxes_created,
+    }
+    payload["wallclock"] = [
+        {
+            "label": f"{suite.max_parallel} concurrent",
+            "v": max(1, round(suite.wall_time_s)),
+            "ok": True,
+        },
+        {
+            "label": "serial equivalent",
+            "v": max(1, round(suite.serial_time_s)),
+            "ok": False,
+        },
+    ]
+    return payload
 
 
 def dashboard_asset_for_path(path: str) -> tuple[bytes, str] | None:

@@ -619,6 +619,8 @@ def test_dashboard_is_bootstrapped_from_the_product_report():
     assert payload["env_id"] == "csv_stats"
     assert payload["summary"]["attempted"] == 8
     assert payload["classes"][0]["id"] == "E0"
+    assert payload["runtime"]["backend"] == "fake"
+    assert payload["runtime"]["sandboxes_created"] == 18
     assert b"window.__RLINT_DATA__=" in console
     assert b'"env_id":"csv_stats"' in console
 

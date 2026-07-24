@@ -69,8 +69,8 @@ button{font:inherit;color:inherit}
     </div>
 
     <div style="margin-top:auto;padding:14px 18px;border-top:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.8">
-      <div>product pipeline · {{ totalRuns }} rollouts</div>
-      <div>detector registry · live</div>
+      <div>{{ runtimeBackend }} backend · {{ sandboxCount }} sandboxes</div>
+      <div>{{ runtimeGrading }} grading · detector registry live</div>
     </div>
   </aside>
 
@@ -747,6 +747,9 @@ class Component extends DCLogic {
       concurrency: this.concurrency,
       effectiveConcurrency: Math.min(this.concurrency, runs.length),
       totalRuns: runs.length,
+      runtimeBackend: window.__RLINT_DATA__?.runtime?.backend || 'preview',
+      runtimeGrading: window.__RLINT_DATA__?.runtime?.grading || 'inband',
+      sandboxCount: window.__RLINT_DATA__?.runtime?.sandboxes_created || runs.length*2,
       stats: [
         {label:'RECALL', value: attempted ? detectedClasses+'/'+attempted : '—/8', sub:'exploit classes detected', fg:'var(--fg)'},
         {label:'MISSED', value: String(missed), sub: missed ? 'E7 network_fetch' : 'none yet', fg: missed ? 'var(--miss)' : 'var(--fg)'},
