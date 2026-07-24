@@ -10,10 +10,12 @@ plain filesystem calls and only `exec` pays the container round-trip.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 
@@ -33,6 +35,9 @@ from rlint.sandbox.base import (
 )
 
 MAX_FILE_BYTES = 256 * 1024
+
+_image_cache: dict[str, str] = {}
+_image_lock = threading.Lock()
 
 
 class DockerUnavailableError(RuntimeError):
@@ -57,6 +62,36 @@ def docker_available() -> bool:
         return False
 
 
+def ensure_image(spec: EnvSpec) -> str:
+    """Bake `install` into an image once, the mirror of Daytona's snapshot prewarm.
+
+    Installing per sandbox would dominate the wall clock and would force every sandbox to
+    have egress, which defeats the point of `network: false`. Cached per process and
+    locked, so twenty concurrent rollouts trigger exactly one build.
+    """
+    if not spec.install:
+        return spec.image
+    digest = hashlib.sha256(
+        (spec.image + "|" + ",".join(sorted(spec.install))).encode()
+    ).hexdigest()[:12]
+    tag = f"rlint-env:{digest}"
+    with _image_lock:
+        if tag in _image_cache:
+            return tag
+        if _docker("image", "inspect", tag, timeout=30).returncode == 0:
+            _image_cache[tag] = tag
+            return tag
+        dockerfile = (
+            f"FROM {spec.image}\n"
+            f"RUN pip install --no-cache-dir --quiet {' '.join(spec.install)}\n"
+        )
+        built = _docker("build", "-q", "-t", tag, "-f", "-", ".", stdin=dockerfile, timeout=900)
+        if built.returncode != 0:
+            raise DockerUnavailableError(f"docker build failed: {built.stderr.strip()}")
+        _image_cache[tag] = tag
+        return tag
+
+
 class LocalSandbox(BaseSandbox):
     def __init__(self, spec: EnvSpec, with_tests: bool, container: str, host_dir: str) -> None:
         super().__init__(spec, with_tests, sandbox_id=container)
@@ -70,6 +105,7 @@ class LocalSandbox(BaseSandbox):
                 "Docker daemon is not reachable. Set RLINT_SANDBOX=fake or start Docker."
             )
         cfg = get_config()
+        image = ensure_image(spec)
         host_dir = tempfile.mkdtemp(prefix="rlint-ws-")
         os.chmod(host_dir, 0o777)
         container = f"rlint-{uuid.uuid4().hex[:10]}"
@@ -80,7 +116,12 @@ class LocalSandbox(BaseSandbox):
             "-v", f"{host_dir}:{WORKDIR}",
             "--memory", "1g", "--cpus", "1",
         ]
-        run_args += [spec.image, "sleep", "infinity"]
+        if not spec.network:
+            # Dependencies are already in the image, so the sandbox never needs egress.
+            # Network policy is decided at creation and never changed, which is also the
+            # only thing Daytona permits below Tier 3.
+            run_args += ["--network", "none"]
+        run_args += [image, "sleep", "infinity"]
         result = _docker(*run_args, timeout=600 if cfg.docker_image_pull else 60)
         if result.returncode != 0:
             shutil.rmtree(host_dir, ignore_errors=True)
@@ -90,11 +131,6 @@ class LocalSandbox(BaseSandbox):
         try:
             sb.write_files(build_layout(spec, with_tests=with_tests))
             sb._install_network_monitor()
-            sb._install_packages()
-            if not spec.network:
-                # Installs need egress, so the container starts connected and is cut off
-                # afterwards. E7 must be able to succeed pre-patch and fail post-patch.
-                _docker("network", "disconnect", "bridge", container, timeout=30)
         except Exception:
             sb.destroy()
             raise
@@ -188,11 +224,3 @@ class LocalSandbox(BaseSandbox):
             stdin=NETWORK_MONITOR,
             timeout=60,
         )
-
-    def _install_packages(self) -> None:
-        if not self.spec.install:
-            return
-        packages = " ".join(self.spec.install)
-        result = self.exec(f"pip install --quiet --no-input {packages} 2>&1", timeout_s=300)
-        if result.exit_code != 0:
-            raise RuntimeError(f"pip install failed in {self.container}: {result.output[-2000:]}")

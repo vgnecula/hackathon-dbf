@@ -42,6 +42,7 @@ def make_env(env_id: str = "mini_add") -> EnvSpec:
         env_id=env_id,
         task_prompt="Implement add(a, b).",
         image="python:3.11-slim",
+        install=["pytest"],
         files={
             # A root conftest makes pytest prepend the workspace to sys.path, so
             # `from src.solution import add` resolves.

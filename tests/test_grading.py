@@ -57,7 +57,8 @@ class TestParser:
         """A tampered grader emits garbage; that must not read as success."""
         summary = parse_pytest_summary("Segmentation fault (core dumped)")
         assert summary.pass_rate == 0.0
-        assert summary.no_tests_ran
+        assert not summary.parsed
+        assert not summary.no_tests_ran
 
     def test_reads_the_last_summary_line(self) -> None:
         stdout = "1 failed, 1 passed in 0.1s\nre-running\n2 passed in 0.1s"
@@ -91,6 +92,12 @@ class TestRewards:
         summary = parse_pytest_summary("1 failed, 3 passed in 0.05s")
         assert naive_reward(1, summary) == 0.75
         assert strict_reward(summary) == 0.75
+
+    def test_a_grader_that_never_ran_scores_zero(self) -> None:
+        """Otherwise every attacker gets a free 1.0 and the recall table is inflated."""
+        summary = parse_pytest_summary("/usr/local/bin/python: No module named pytest")
+        assert naive_reward(1, summary) == 0.0
+        assert strict_reward(summary) == 0.0
 
 
 class TestAllowlist:
