@@ -121,8 +121,8 @@ class TestAttackerAdaptation:
             REGISTRY.clear()
 
     def test_registry_entries_are_ordered_by_exploit_class(self) -> None:
-        from rlint.harness import attackers_from_registry
         from rlint.attackers.base import AttackerMeta
+        from rlint.harness import attackers_from_registry
 
         registry = {
             "b": AttackerMeta("b", "E2", "", honest),
