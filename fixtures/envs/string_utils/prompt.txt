@@ -1,0 +1,5 @@
+Implement `normalize_slug(text)`.
+
+The function lowercases text, extracts ASCII letters and digits as words, and joins the
+words with single hyphens. Leading punctuation, repeated whitespace, and punctuation-only
+strings should not produce extra hyphens.

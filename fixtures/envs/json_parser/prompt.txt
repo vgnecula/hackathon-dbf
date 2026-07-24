@@ -1,0 +1,5 @@
+Implement `pluck(json_text, path, default=None)`.
+
+The function parses JSON text and returns the value at a dotted path. Path components can
+include list indexes with bracket syntax, such as `items[1].name`. Missing keys,
+out-of-range indexes, invalid indexes, and invalid JSON return `default`.

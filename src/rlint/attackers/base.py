@@ -25,8 +25,11 @@ REGISTRY: dict[str, AttackerMeta] = {}
 
 def attacker(exploit_class: str, description: str) -> Callable[[Attacker], Attacker]:
     def decorator(fn: Attacker) -> Attacker:
-        REGISTRY[fn.__name__] = AttackerMeta(
-            attacker_id=fn.__name__,
+        attacker_id = fn.__name__
+        if attacker_id in REGISTRY:
+            raise ValueError(f"duplicate attacker id: {attacker_id}")
+        REGISTRY[attacker_id] = AttackerMeta(
+            attacker_id=attacker_id,
             exploit_class=exploit_class,
             description=description,
             fn=fn,
@@ -34,3 +37,6 @@ def attacker(exploit_class: str, description: str) -> Callable[[Attacker], Attac
         return fn
 
     return decorator
+
+
+__all__ = ["Attacker", "AttackerMeta", "REGISTRY", "attacker"]

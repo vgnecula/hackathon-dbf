@@ -1,0 +1,5 @@
+Implement `summarize_csv(text, column="value")`.
+
+The function receives CSV text with a header row and returns a dictionary with numeric
+summary statistics for the named column: count, total, mean, min, and max. Empty columns
+produce count 0, total 0.0, mean 0.0, min None, and max None.
