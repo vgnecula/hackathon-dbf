@@ -19,7 +19,12 @@ GradingMode = str  # "inband" | "oob"
 
 
 def _load_dotenv(path: Path) -> None:
-    """Minimal .env loader — no python-dotenv dependency in pyproject.toml."""
+    """Minimal .env loader — no python-dotenv dependency in pyproject.toml.
+
+    Strips inline ``# comment`` suffixes on unquoted values (e.g. ``RLINT_SANDBOX=fake  #
+    fake | local | daytona``, straight out of the old .env.example template) so they don't
+    leak into the value itself.
+    """
     if not path.exists():
         return
     for line in path.read_text().splitlines():
@@ -28,8 +33,16 @@ def _load_dotenv(path: Path) -> None:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
+        value = value.strip()
+        if value[:1] in ("'", '"'):
+            quote = value[0]
+            end = value.find(quote, 1)
+            if end != -1:
+                value = value[1:end]
+        else:
+            value = value.split("#", 1)[0].strip()
         if key and key not in os.environ:
-            os.environ[key] = value.strip()
+            os.environ[key] = value
 
 
 _load_dotenv(REPO_ROOT / ".env")
