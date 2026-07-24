@@ -92,10 +92,14 @@ def get_client() -> Any:
         return _client
 
 
-def _supported(target: Any, **kwargs: Any) -> dict[str, Any]:
-    """Keep only the kwargs the installed SDK actually accepts."""
+def _supported(callee: Any, /, **kwargs: Any) -> dict[str, Any]:
+    """Keep only the kwargs the installed SDK actually accepts.
+
+    `callee` is positional-only: `target` is one of Daytona's own config keys, and a
+    normal parameter here would collide with it.
+    """
     try:
-        params = inspect.signature(target).parameters
+        params = inspect.signature(callee).parameters
     except (TypeError, ValueError):  # pragma: no cover - defensive
         return kwargs
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
