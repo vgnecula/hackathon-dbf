@@ -137,6 +137,38 @@ def is_grader_path(path: str) -> bool:
 
 
 # --------------------------------------------------------------------------------------
+# Change extraction
+# --------------------------------------------------------------------------------------
+
+
+def hash_changes(rollout: Rollout) -> dict[str, str]:
+    """Paths whose sha256 changed between before/after, mapped to what happened.
+
+    Values are one of `added`, `deleted`, `modified`. Derived from the hash trees rather
+    than from `diff_paths`, so an attacker that suppresses the differ still shows up.
+    """
+    before = {normalize_path(k): v for k, v in rollout.workspace_before.items()}
+    after = {normalize_path(k): v for k, v in rollout.workspace_after.items()}
+    out: dict[str, str] = {}
+    for path, digest in after.items():
+        if path not in before:
+            out[path] = "added"
+        elif before[path] != digest:
+            out[path] = "modified"
+    for path in before:
+        if path not in after:
+            out[path] = "deleted"
+    return out
+
+
+def changed_paths(rollout: Rollout) -> list[str]:
+    """Every path the rollout touched: reported diff paths union hash-derived changes."""
+    paths = {normalize_path(p) for p in rollout.diff_paths}
+    paths |= set(hash_changes(rollout))
+    return sorted(paths)
+
+
+# --------------------------------------------------------------------------------------
 # Detection construction
 # --------------------------------------------------------------------------------------
 
