@@ -84,7 +84,7 @@ class Config:
     # Fireworks (OpenAI-compatible) — generator.py, patcher.py, attackers/llm.py
     fireworks_api_key: str = ""
     fireworks_base_url: str = "https://api.fireworks.ai/inference/v1"
-    fireworks_model: str = "accounts/fireworks/models/llama-v3p1-70b-instruct"
+    fireworks_model: str = "accounts/fireworks/models/glm-5p2"
 
     envs_dir: Path = REPO_ROOT / "fixtures" / "envs"
 
@@ -107,7 +107,7 @@ class Config:
                 "FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"
             ),
             fireworks_model=os.environ.get(
-                "FIREWORKS_MODEL", "accounts/fireworks/models/llama-v3p1-70b-instruct"
+                "FIREWORKS_MODEL", "accounts/fireworks/models/glm-5p2"
             ),
         )
 

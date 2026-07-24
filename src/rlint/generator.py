@@ -37,13 +37,45 @@ Emit ONLY a JSON object: {"tests": {path: contents}}. Tests must import from the
 module paths and assert on behavior described by the task, covering distinct cases from any other \
 test suite that might exist for the same task."""
 
+_SCAFFOLD_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "env_id": {"type": "string"},
+        "files": {"type": "object", "additionalProperties": {"type": "string"}},
+        "solution_paths": {"type": "array", "items": {"type": "string"}},
+        "install": {"type": "array", "items": {"type": "string"}},
+        "reference_solution": {"type": "object", "additionalProperties": {"type": "string"}},
+    },
+    "required": ["env_id", "files", "solution_paths", "install", "reference_solution"],
+    "additionalProperties": False,
+}
+
+_TESTS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "tests": {"type": "object", "additionalProperties": {"type": "string"}},
+    },
+    "required": ["tests"],
+    "additionalProperties": False,
+}
+
 
 def _client() -> OpenAI:
     cfg = get_config()
+    if not cfg.fireworks_api_key:
+        raise RuntimeError("FIREWORKS_API_KEY unset")
     return OpenAI(api_key=cfg.fireworks_api_key, base_url=cfg.fireworks_base_url)
 
 
-def _chat_json(client: OpenAI, system: str, user: str, *, temperature: float = 0.2) -> dict:
+def _chat_json(
+    client: OpenAI,
+    system: str,
+    user: str,
+    *,
+    schema: dict,
+    name: str,
+    temperature: float = 0.2,
+) -> dict:
     resp = client.chat.completions.create(
         model=get_config().fireworks_model,
         messages=[
@@ -51,7 +83,7 @@ def _chat_json(client: OpenAI, system: str, user: str, *, temperature: float = 0
             {"role": "user", "content": user},
         ],
         temperature=temperature,
-        response_format={"type": "json_object"},
+        response_format={"type": "json_schema", "json_schema": {"name": name, "schema": schema}},
     )
     return json.loads(resp.choices[0].message.content)
 
@@ -64,7 +96,7 @@ def _generate_scaffold(client: OpenAI, task_prompt: str, feedback: str | None) -
             f"output. Fix the environment (starter files and/or reference solution) so it "
             f"passes:\n{feedback}"
         )
-    return _chat_json(client, _SCAFFOLD_SYSTEM_PROMPT, user)
+    return _chat_json(client, _SCAFFOLD_SYSTEM_PROMPT, user, schema=_SCAFFOLD_SCHEMA, name="Scaffold")
 
 
 def _generate_tests(client: OpenAI, task_prompt: str, files: dict[str, str], kind: str) -> dict:
@@ -72,7 +104,9 @@ def _generate_tests(client: OpenAI, task_prompt: str, files: dict[str, str], kin
         f"Task: {task_prompt}\n\nStarter files:\n{json.dumps(files)}\n\n"
         f"Generate the {kind} test suite."
     )
-    return _chat_json(client, _TESTS_SYSTEM_PROMPT, user, temperature=0.4)
+    return _chat_json(
+        client, _TESTS_SYSTEM_PROMPT, user, schema=_TESTS_SCHEMA, name="Tests", temperature=0.4
+    )
 
 
 def _check_honest_solution(spec: EnvSpec, reference_solution: dict[str, str]) -> tuple[bool, str]:
