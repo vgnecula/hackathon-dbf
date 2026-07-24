@@ -160,10 +160,16 @@ def generate_env(task_prompt: str, env_id: str | None = None, *, max_attempts: i
             _generate_tests(client, task_prompt, scaffold["files"], "heldout")["tests"], "heldout"
         )
 
+        # The default grader is `python -m pytest`, but the base image is bare
+        # (python:3.11-slim) and the model routinely omits pytest from install. Without
+        # this the honest reference solution fails on any real backend with "No module
+        # named pytest" and every generated env looks broken.
+        install = list(dict.fromkeys(["pytest", *scaffold.get("install", [])]))
+
         spec = EnvSpec(
             env_id=eid,
             task_prompt=task_prompt,
-            install=scaffold.get("install", []),
+            install=install,
             files=scaffold["files"],
             solution_paths=scaffold.get("solution_paths", ["src/**"]),
             visible_tests=visible,
