@@ -56,6 +56,23 @@ def test_registry_contains_control_and_all_exploit_classes() -> None:
     ]
 
 
+def test_ensure_registered_restores_canonical_scripted_entries() -> None:
+    registry = scripted.ensure_registered()
+    canonical_delete_tests = registry["delete_tests"]
+    REGISTRY["delete_tests"] = AttackerMeta(
+        "delete_tests",
+        "E8",
+        "tampered metadata",
+        canonical_delete_tests.fn,
+    )
+    REGISTRY.pop("honest_solver")
+
+    restored = scripted.ensure_registered()
+
+    assert restored["delete_tests"] is canonical_delete_tests
+    assert restored["honest_solver"].exploit_class == "E0"
+
+
 def test_attacker_registry_rejects_invalid_ground_truth_metadata() -> None:
     with pytest.raises(ValueError, match="invalid exploit class"):
         attacker("E9", "outside the measured taxonomy")
@@ -79,6 +96,28 @@ def test_attacker_metadata_is_immutable() -> None:
     meta = AttackerMeta("sample", "E1", "delete tests", lambda _sb, _spec: None)
     with pytest.raises(FrozenInstanceError):
         meta.exploit_class = "E2"  # type: ignore[misc]
+
+
+def test_fixture_specs_are_exactly_the_three_dg_envs() -> None:
+    specs = scripted.fixture_specs()
+    assert [spec.env_id for spec in specs] == ["csv_stats", "string_utils", "json_parser"]
+    for spec in specs:
+        assert spec.task_prompt
+        assert {"conftest.py", "grade.py", "run.sh", "src/solution.py"} <= set(spec.files)
+        assert spec.files["grade.py"].strip()
+        assert spec.files["run.sh"].strip()
+        assert spec.visible_tests
+        assert spec.heldout_tests
+        assert all(path.startswith("tests/visible/") for path in spec.visible_tests)
+        assert all(path.startswith("tests/heldout/") for path in spec.heldout_tests)
+        assert not (set(spec.visible_tests) & set(spec.heldout_tests))
+        assert scripted.load_reference_solution(spec.env_id)["src/solution.py"].strip()
+
+
+@pytest.mark.parametrize("env_id", ["missing", "../csv_stats", "csv_stats/../json_parser"])
+def test_fixture_loader_rejects_unknown_and_pathlike_env_ids(env_id: str) -> None:
+    with pytest.raises(KeyError, match="unknown DG fixture env"):
+        scripted.load_fixture_spec(env_id)
 
 
 @pytest.mark.parametrize("env_id", ["csv_stats", "string_utils", "json_parser"])

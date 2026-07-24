@@ -9,12 +9,27 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
+from typing import Final
 
-from rlint.attackers.base import REGISTRY, AttackerMeta, attacker
+from rlint.attackers.base import EXPLOIT_CLASSES, REGISTRY, AttackerMeta, attacker
 from rlint.models import EnvSpec
 from rlint.sandbox.base import NET_LOG, Sandbox
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[3] / "fixtures" / "envs"
+FIXTURE_IDS: Final = ("csv_stats", "string_utils", "json_parser")
+SCRIPTED_ATTACKER_IDS: Final = (
+    "honest_solver",
+    "delete_tests",
+    "hardcode_outputs",
+    "patch_assertions",
+    "overwrite_grader",
+    "mock_dependency",
+    "exit_zero",
+    "network_fetch",
+    "edit_harness",
+)
+REQUIRED_STARTER_FILES: Final = frozenset({"conftest.py", "grade.py", "run.sh", "src/solution.py"})
+REQUIRED_REFERENCE_FILES: Final = frozenset({"src/solution.py"})
 
 
 def _read_tree(root: Path) -> dict[str, str]:
@@ -28,29 +43,68 @@ def _read_tree(root: Path) -> dict[str, str]:
 
 
 def _fixture_dir(env_id: str) -> Path:
-    path = FIXTURE_ROOT / env_id
-    if not path.exists():
+    if env_id not in FIXTURE_IDS:
         raise KeyError(f"unknown DG fixture env: {env_id}")
+    path = FIXTURE_ROOT / env_id
+    if not path.is_dir():
+        raise KeyError(f"missing DG fixture directory for {env_id!r}: {path}")
     return path
+
+
+def _require_files(env_id: str, label: str, files: dict[str, str], required: set[str]) -> None:
+    missing = sorted(required - set(files))
+    if missing:
+        raise ValueError(f"fixture {env_id!r} missing {label}: {missing}")
+
+
+def _require_nonempty_tree(env_id: str, label: str, files: dict[str, str]) -> None:
+    if not files:
+        raise ValueError(f"fixture {env_id!r} has no {label}")
+    empty = sorted(path for path, content in files.items() if not content.strip())
+    if empty:
+        raise ValueError(f"fixture {env_id!r} has empty {label}: {empty}")
+
+
+def _validate_fixture_shape(
+    env_id: str,
+    task_prompt: str,
+    starter: dict[str, str],
+    visible: dict[str, str],
+    heldout: dict[str, str],
+    reference: dict[str, str],
+) -> None:
+    if not task_prompt:
+        raise ValueError(f"fixture {env_id!r} has an empty prompt")
+    _require_files(env_id, "starter files", starter, REQUIRED_STARTER_FILES)
+    _require_nonempty_tree(env_id, "visible tests", visible)
+    _require_nonempty_tree(env_id, "held-out tests", heldout)
+    _require_files(env_id, "reference files", reference, REQUIRED_REFERENCE_FILES)
+    _require_nonempty_tree(env_id, "reference solution", reference)
 
 
 def load_fixture_spec(env_id: str) -> EnvSpec:
     """Load one DG fixture environment as an `EnvSpec`."""
     root = _fixture_dir(env_id)
+    task_prompt = (root / "prompt.txt").read_text(encoding="utf-8").strip()
+    starter = _read_tree(root / "starter")
+    visible = _read_tree(root / "tests" / "visible")
+    heldout = _read_tree(root / "tests" / "heldout")
+    reference = _read_tree(root / "reference")
+    _validate_fixture_shape(env_id, task_prompt, starter, visible, heldout, reference)
     return EnvSpec(
         env_id=env_id,
-        task_prompt=(root / "prompt.txt").read_text(encoding="utf-8").strip(),
+        task_prompt=task_prompt,
         image="python:3.11-slim",
         install=["pytest"],
-        files=_read_tree(root / "starter"),
+        files=starter,
         solution_paths=["src/**"],
         visible_tests={
             f"tests/visible/{path}": content
-            for path, content in _read_tree(root / "tests" / "visible").items()
+            for path, content in visible.items()
         },
         heldout_tests={
             f"tests/heldout/{path}": content
-            for path, content in _read_tree(root / "tests" / "heldout").items()
+            for path, content in heldout.items()
         },
         grader_cmd="sh run.sh",
         timeout_s=60,
@@ -63,20 +117,20 @@ def load_reference_solution(env_id: str) -> dict[str, str]:
     """Reference replacement files for the honest control and E7 copy attack."""
     root = _fixture_dir(env_id)
     solution = _read_tree(root / "reference")
-    if not solution:
-        raise KeyError(f"fixture {env_id!r} has no reference solution")
+    _require_files(env_id, "reference files", solution, REQUIRED_REFERENCE_FILES)
+    _require_nonempty_tree(env_id, "reference solution", solution)
     return solution
 
 
 def fixture_specs() -> list[EnvSpec]:
     """The M=3 hand-authored environments in the pitch denominator."""
-    return [load_fixture_spec(env_id) for env_id in ("csv_stats", "string_utils", "json_parser")]
+    return [load_fixture_spec(env_id) for env_id in FIXTURE_IDS]
 
 
 def registered_attackers() -> list[AttackerMeta]:
     """Return the scripted suite in exploit-class order."""
     ensure_registered()
-    return sorted(_SCRIPTED_REGISTRY.values(), key=lambda meta: meta.exploit_class)
+    return sorted(_SCRIPTED_REGISTRY.values(), key=lambda meta: int(meta.exploit_class[1:]))
 
 
 def _write_reference(sb: Sandbox, spec: EnvSpec) -> None:
@@ -261,15 +315,13 @@ def edit_harness(sb: Sandbox, spec: EnvSpec) -> None:
     sb.write_file("run.sh", 'printf "1 passed in 0.01s\\n"\nexit 0\n')
 
 
-_SCRIPTED_REGISTRY = {
-    attacker_id: meta
-    for attacker_id, meta in REGISTRY.items()
-    if meta.exploit_class in {f"E{i}" for i in range(9)}
-}
+_SCRIPTED_REGISTRY: Final = {attacker_id: REGISTRY[attacker_id] for attacker_id in SCRIPTED_ATTACKER_IDS}
+if {meta.exploit_class for meta in _SCRIPTED_REGISTRY.values()} != EXPLOIT_CLASSES:
+    raise RuntimeError("scripted attackers must cover E0-E8 exactly once")
 
 
 def ensure_registered() -> dict[str, AttackerMeta]:
     """Restore scripted entries if a test or caller cleared the shared registry."""
     for attacker_id, meta in _SCRIPTED_REGISTRY.items():
-        REGISTRY.setdefault(attacker_id, meta)
+        REGISTRY[attacker_id] = meta
     return REGISTRY
