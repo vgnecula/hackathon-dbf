@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import threading
 import webbrowser
 from collections.abc import Sequence
@@ -11,6 +12,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from urllib.parse import urlsplit
 
+from .payload import report_payload
+
 _ROUTES = {
     "/": ("index.dc.html", "text/html; charset=utf-8"),
     "/index.html": ("index.dc.html", "text/html; charset=utf-8"),
@@ -18,6 +21,7 @@ _ROUTES = {
     "/console.html": ("console.dc.html", "text/html; charset=utf-8"),
     "/support.js": ("support.js", "text/javascript; charset=utf-8"),
 }
+_BOOT_TAG = b'<script src="./support.js"></script>'
 
 
 def asset_for_path(path: str) -> tuple[bytes, str] | None:
@@ -30,28 +34,79 @@ def asset_for_path(path: str) -> tuple[bytes, str] | None:
     return content, content_type
 
 
+def product_payload() -> dict[str, object]:
+    """Run the real detector registry over the canonical product rollouts."""
+    from ...report import demo_rollouts
+    from ..registry import build_report
+
+    rollouts = demo_rollouts()
+    return report_payload(build_report("csv_stats", rollouts))
+
+
+def dashboard_asset_for_path(path: str) -> tuple[bytes, str] | None:
+    """Inject the current product report into generated HTML views."""
+    asset = asset_for_path(path)
+    if asset is None:
+        return None
+    body, content_type = asset
+    if not content_type.startswith("text/html"):
+        return asset
+    encoded = json.dumps(product_payload(), separators=(",", ":")).replace("</", "<\\/")
+    bootstrap = f"<script>window.__RLINT_DATA__={encoded};</script>".encode()
+    return body.replace(_BOOT_TAG, bootstrap + _BOOT_TAG, 1), content_type
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
-    """Small allowlisted static server for the two dashboard views."""
+    """Allowlisted dashboard server backed by the detector/report pipeline."""
 
     server_version = "rlint-dashboard/0.1"
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        if urlsplit(self.path).path == "/api/report":
+            self._send_json(product_payload())
+            return
         self._send_asset(include_body=True)
 
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        if urlsplit(self.path).path == "/api/run":
+            self._send_json(product_payload())
+            return
+        self._send_not_found(include_body=True)
+
     def do_HEAD(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        if urlsplit(self.path).path == "/api/report":
+            self._send_json(product_payload(), include_body=False)
+            return
         self._send_asset(include_body=False)
 
     def _send_asset(self, *, include_body: bool) -> None:
-        asset = asset_for_path(urlsplit(self.path).path)
+        asset = dashboard_asset_for_path(urlsplit(self.path).path)
         if asset is None:
-            body = b"Not found\n"
-            self.send_response(HTTPStatus.NOT_FOUND)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-        else:
-            body, content_type = asset
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Cache-Control", "no-store")
+            self._send_not_found(include_body=include_body)
+            return
+        body, content_type = asset
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if include_body:
+            self.wfile.write(body)
+
+    def _send_json(self, payload: object, *, include_body: bool = True) -> None:
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if include_body:
+            self.wfile.write(body)
+
+    def _send_not_found(self, *, include_body: bool) -> None:
+        body = b"Not found\n"
+        self.send_response(HTTPStatus.NOT_FOUND)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if include_body:

@@ -49,6 +49,7 @@ button{font:inherit;color:inherit}
       <a href="#pipeline" style="border:0;color:var(--muted)">pipeline</a>
       <a href="#results" style="border:0;color:var(--muted)">results</a>
       <a href="#gaps" style="border:0;color:var(--muted)">gaps</a>
+      <a href="/console" style="border:0;color:var(--accent)">try it out →</a>
       <button type="button" onClick="{{ toggleTheme }}" aria-label="Toggle colour scheme" style="background:transparent;border:1px solid var(--line);border-radius:2px;padding:5px 9px;font-family:var(--mono);font-size:11px;color:var(--muted);cursor:pointer;transition:color 240ms ease-out,border-color 240ms ease-out" style-hover="color:var(--fg);border-color:var(--fg2)">{{ themeLabel }}</button>
     </nav>
   </header>
@@ -57,14 +58,18 @@ button{font:inherit;color:inherit}
     <div data-reveal style="font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Reward-hacking linter</div>
     <h1 data-reveal style="font-size:clamp(38px,6.2vw,74px);line-height:1.02;letter-spacing:-0.03em;font-weight:500;margin:22px 0 0;text-wrap:balance">Attack the environment<br>before you train on it.</h1>
     <p data-reveal style="font-size:clamp(17px,2vw,21px);line-height:1.5;color:var(--fg2);max-width:640px;margin:28px 0 0;text-wrap:pretty">rlint runs a catalogue of known reward-hacking exploits against a candidate RL environment, grades every run out-of-band in a fresh sandbox, and reports which exploits got through.</p>
+    <div data-reveal style="display:flex;flex-wrap:wrap;align-items:center;gap:18px;margin-top:34px">
+      <a href="/console" style="display:inline-flex;align-items:center;gap:10px;background:var(--accent);color:var(--bg);border:1px solid var(--accent);border-radius:2px;padding:11px 16px;font-family:var(--mono);font-size:13px">Try the live detector suite <span aria-hidden="true">→</span></a>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">runs the real detector registry · no API key required</span>
+    </div>
     <div data-reveal style="display:flex;flex-wrap:wrap;gap:44px;align-items:flex-end;margin:64px 0 0;padding:28px 0 0;border-top:1px solid var(--line)">
       <div>
-        <div style="font-family:var(--mono);font-size:clamp(46px,7vw,80px);line-height:1;letter-spacing:-0.04em;font-variant-numeric:tabular-nums">7<span style="color:var(--muted)">/8</span></div>
-        <div style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:12px">exploit classes detected · recall 87.5%</div>
+        <div style="font-family:var(--mono);font-size:clamp(46px,7vw,80px);line-height:1;letter-spacing:-0.04em;font-variant-numeric:tabular-nums">{{ caught }}<span style="color:var(--muted)">/{{ attempted }}</span></div>
+        <div style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:12px">exploit classes detected · recall {{ recallPct }}</div>
       </div>
       <div style="font-family:var(--mono);font-size:12px;color:var(--muted);line-height:2">
-        <div>3 environments · 8 exploit classes · 21 attacker runs</div>
-        <div>false positives <span style="color:var(--fg)">0/1</span> · missed <span style="color:var(--miss)">E7 network_fetch</span></div>
+        <div>{{ environmentCount }} environment · {{ attempted }} exploit classes · {{ runCount }} rollout records</div>
+        <div>false-positive rate <span style="color:var(--fg)">{{ falsePositivePct }}</span> · missed <span style="color:var(--miss)">{{ missedLabel }}</span></div>
       </div>
     </div>
   </section>
@@ -151,7 +156,7 @@ button{font:inherit;color:inherit}
         </sc-for>
       </div>
     </div>
-    <div data-reveal style="font-family:var(--mono);font-size:12px;color:var(--muted);padding:14px 2px 0">recall 7/8 (87.5%) · false positives 0/1 · missed: <span style="color:var(--miss)">E7</span></div>
+    <div data-reveal style="font-family:var(--mono);font-size:12px;color:var(--muted);padding:14px 2px 0">recall {{ caught }}/{{ attempted }} ({{ recallPct }}) · false-positive rate {{ falsePositivePct }} · missed: <span style="color:var(--miss)">{{ missedLabel }}</span></div>
   </section>
 
   <section id="pipeline" data-prog="pipe" style="padding:0 0 130px">
@@ -171,10 +176,10 @@ button{font:inherit;color:inherit}
         <div data-stage="2" style="flex:2 1 300px;border:1px solid var(--line);border-radius:2px;padding:14px;background:var(--bg);opacity:0.28;transition:opacity 320ms ease-out,border-color 320ms ease-out">
           <div style="display:flex;justify-content:space-between;align-items:baseline">
             <div style="font-family:var(--mono);font-size:11px;color:var(--muted)">POLICY SANDBOXES</div>
-            <div style="font-family:var(--mono);font-size:11px;color:var(--fg2)">21 ×</div>
+            <div style="font-family:var(--mono);font-size:11px;color:var(--fg2)">{{ runCount }} ×</div>
           </div>
           <div style="display:flex;gap:3px;margin-top:10px">
-            <sc-for list="{{ boxes }}" as="b" hint-placeholder-count="21"><div style="flex:1;height:22px;border:1px solid var(--line);background:var(--panel2)"></div></sc-for>
+            <sc-for list="{{ boxes }}" as="b" hint-placeholder-count="9"><div style="flex:1;height:22px;border:1px solid var(--line);background:var(--panel2)"></div></sc-for>
           </div>
           <div style="font-size:12px;color:var(--muted);margin-top:9px;font-family:var(--mono)">one attacker each · parallel</div>
         </div>
@@ -367,7 +372,7 @@ button{font:inherit;color:inherit}
 </main>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props="{&quot;startTheme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;'dark' | 'light'&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;oklch(0.76 0.11 205)&quot;,&quot;oklch(0.78 0.13 150)&quot;,&quot;oklch(0.75 0.12 275)&quot;],&quot;default&quot;:&quot;oklch(0.76 0.11 205)&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;missColor&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;oklch(0.74 0.14 47)&quot;,&quot;oklch(0.68 0.17 25)&quot;,&quot;oklch(0.80 0.14 90)&quot;],&quot;default&quot;:&quot;oklch(0.74 0.14 47)&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
-const DATA = {
+const DATA = window.__RLINT_DATA__ || {
   classes: [
     {id:'E0',attacker:'honest_solver',reward:1.00,visible:1.00,heldout:1.00,detected:null,
      attack:'Solves the task as specified. Control arm — it should pass the visible and the held-out suite, and no detector should fire on it.',
@@ -602,11 +607,18 @@ class Component extends DCLogic {
     const rewardPath = pts((t,i) => Math.min(1, 0.18 + 0.86*(1-Math.exp(-4.2*t)) + noise(i)*0.045*(1-t)));
     const capPath = pts((t,i) => 0.30 + noise(i+7)*0.035);
 
+    const caught = DATA.summary?.caught ?? cs.filter(c => c.id !== 'E0' && c.detected).length;
+    const attempted = DATA.summary?.attempted ?? cs.filter(c => c.id !== 'E0').length;
+    const recallPct = attempted ? (caught/attempted*100).toFixed(1)+'%' : 'n/a';
+    const falsePositivePct = ((DATA.summary?.false_positive_rate ?? 0)*100).toFixed(1)+'%';
+    const missedLabel = DATA.summary?.missed?.length ? DATA.summary.missed.join(', ') : 'none';
     const tip = this.state.tip;
     return {
       rows, dumbbell, bars, classCols, heatRows, diffRows, slopes, parBars,
-      boxes: Array.from({length:21}, (_,i) => i),
+      boxes: Array.from({length:cs.length}, (_,i) => i),
       rewardPath, capPath,
+      caught, attempted, recallPct, falsePositivePct, missedLabel,
+      environmentCount: DATA.envs?.length || 1, runCount: cs.length,
       themeLabel: this.theme === 'dark' ? 'light' : 'dark',
       toggleTheme: () => this.setState({ theme: this.theme === 'dark' ? 'light' : 'dark' }),
       onLeaveRow: () => this.setState({hover: null}),
