@@ -1,18 +1,17 @@
-"""Frozen contract — DG owns the registry and scripted.py, harness consumes REGISTRY.
-
-Do not edit outside the DG track (see AGENTS.md). VG owns this stub only up to the freeze.
-"""
+"""Ground-truth attacker metadata and registration."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Final
 
 from rlint.models import EnvSpec
 from rlint.sandbox.base import Sandbox
 
 Attacker = Callable[[Sandbox, EnvSpec], None]
+EXPLOIT_CLASSES: Final = frozenset(f"E{i}" for i in range(9))
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class AttackerMeta:
     attacker_id: str
     exploit_class: str  # "E0".."E8"
@@ -24,6 +23,16 @@ REGISTRY: dict[str, AttackerMeta] = {}
 
 
 def attacker(exploit_class: str, description: str) -> Callable[[Attacker], Attacker]:
+    """Register one deterministic attacker with immutable ground-truth metadata."""
+    if exploit_class not in EXPLOIT_CLASSES:
+        raise ValueError(
+            f"invalid exploit class {exploit_class!r}; "
+            f"expected one of {sorted(EXPLOIT_CLASSES)}"
+        )
+    description = description.strip()
+    if not description:
+        raise ValueError("attacker description must not be empty")
+
     def decorator(fn: Attacker) -> Attacker:
         attacker_id = fn.__name__
         if attacker_id in REGISTRY:
@@ -39,4 +48,4 @@ def attacker(exploit_class: str, description: str) -> Callable[[Attacker], Attac
     return decorator
 
 
-__all__ = ["Attacker", "AttackerMeta", "REGISTRY", "attacker"]
+__all__ = ["EXPLOIT_CLASSES", "Attacker", "AttackerMeta", "REGISTRY", "attacker"]

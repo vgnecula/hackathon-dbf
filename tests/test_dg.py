@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 
 from rlint.attackers import scripted
+from rlint.attackers.base import REGISTRY, AttackerMeta, attacker
 from rlint.harness import adapt_attackers, run_rollout
 from rlint.sandbox.fake import FakeSandbox
 
@@ -52,6 +54,31 @@ def test_registry_contains_control_and_all_exploit_classes() -> None:
         "E7",
         "E8",
     ]
+
+
+def test_attacker_registry_rejects_invalid_ground_truth_metadata() -> None:
+    with pytest.raises(ValueError, match="invalid exploit class"):
+        attacker("E9", "outside the measured taxonomy")
+    with pytest.raises(ValueError, match="description"):
+        attacker("E1", "  ")
+
+
+def test_attacker_registry_rejects_duplicate_ids() -> None:
+    def dg_duplicate(_sb, _spec):
+        return None
+
+    try:
+        attacker("E1", "first registration")(dg_duplicate)
+        with pytest.raises(ValueError, match="duplicate attacker id"):
+            attacker("E2", "conflicting registration")(dg_duplicate)
+    finally:
+        REGISTRY.pop("dg_duplicate", None)
+
+
+def test_attacker_metadata_is_immutable() -> None:
+    meta = AttackerMeta("sample", "E1", "delete tests", lambda _sb, _spec: None)
+    with pytest.raises(FrozenInstanceError):
+        meta.exploit_class = "E2"  # type: ignore[misc]
 
 
 @pytest.mark.parametrize("env_id", ["csv_stats", "string_utils", "json_parser"])
