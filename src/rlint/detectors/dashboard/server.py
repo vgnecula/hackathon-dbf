@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import threading
 import webbrowser
 from collections.abc import Sequence
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .payload import report_payload
 
@@ -22,6 +23,8 @@ _ROUTES = {
     "/support.js": ("support.js", "text/javascript; charset=utf-8"),
 }
 _BOOT_TAG = b'<script src="./support.js"></script>'
+DEFAULT_ENV_ID = "csv_stats"
+DEFAULT_GRADING = "inband"
 
 
 def asset_for_path(path: str) -> tuple[bytes, str] | None:
@@ -34,25 +37,88 @@ def asset_for_path(path: str) -> tuple[bytes, str] | None:
     return content, content_type
 
 
-def product_payload() -> dict[str, object]:
-    """Run the full product pipeline on the key-free fake sandbox backend."""
-    from ...attackers.scripted import load_fixture_spec, registered_attackers
+_PAYLOAD_LOCK = threading.Lock()
+_CACHED_PAYLOADS: dict[tuple[str, str, str], dict[str, object]] = {}
+
+
+def _selected_option(value: str | None, allowed: Sequence[str], default: str) -> str:
+    if value in allowed:
+        return value
+    return default
+
+
+def _request_options(path: str, body: bytes = b"") -> tuple[str, str]:
+    """Parse dashboard run options from a query string or JSON request body."""
+    from ...attackers.scripted import FIXTURE_IDS
+
+    parsed = urlsplit(path)
+    query = parse_qs(parsed.query)
+    data: dict[str, object] = {}
+    if body:
+        try:
+            decoded = json.loads(body.decode())
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            decoded = {}
+        if isinstance(decoded, dict):
+            data = decoded
+
+    env_id = str(data.get("env_id") or query.get("env_id", [""])[0] or DEFAULT_ENV_ID)
+    grading = str(data.get("grading") or query.get("grading", [""])[0] or DEFAULT_GRADING)
+    return (
+        _selected_option(env_id, FIXTURE_IDS, DEFAULT_ENV_ID),
+        _selected_option(grading, ("inband", "oob"), DEFAULT_GRADING),
+    )
+
+
+def _dashboard_backend() -> str:
+    """Which sandbox backend the dashboard runs the product pipeline on.
+
+    Defaults to a *real* backend: the fake sandbox does not execute code, so it silently
+    misreports the hardcode (E2) and mock-dependency (E5) classes as missed and the
+    recall as 6/8 instead of the true 8/8. Set ``RLINT_DASHBOARD_BACKEND=fake`` for a
+    Docker/key-free preview when you knowingly want the placeholder numbers.
+
+    Deliberately does *not* consult ``RLINT_SANDBOX``: that is commonly pinned to ``fake``
+    in a developer ``.env`` for fast unit runs, and the dashboard must still show real
+    recall regardless. Only the dashboard-specific override switches it.
+    """
+    return os.environ.get("RLINT_DASHBOARD_BACKEND") or "local"
+
+
+def _run_pipeline(backend: str, env_id: str, grading: str) -> dict[str, object]:
+    from ...attackers.scripted import FIXTURE_IDS, load_fixture_spec, registered_attackers
     from ...harness import run_suite
     from ..registry import build_report
 
-    spec = load_fixture_spec("csv_stats")
+    env_id = _selected_option(env_id, FIXTURE_IDS, DEFAULT_ENV_ID)
+    grading = _selected_option(grading, ("inband", "oob"), DEFAULT_GRADING)
+    spec = load_fixture_spec(env_id)
     attackers = registered_attackers()
     suite = run_suite(
         spec,
         attackers,
-        backend="fake",
-        grading="inband",
+        backend=backend,
+        grading=grading,
         max_parallel=len(attackers),
     )
-    payload = report_payload(build_report(suite.env_id, suite.rollouts))
+    payload = report_payload(
+        build_report(suite.env_id, suite.rollouts, solution_paths=spec.solution_paths)
+    )
+    active_recall = payload.get("envs", [{}])[0].get("recall", "—")
+    payload["envs"] = [
+        {
+            "id": fixture_id,
+            "name": fixture_id,
+            "recall": active_recall if fixture_id == env_id else "—",
+            "status": "this run" if fixture_id == env_id else "ready",
+        }
+        for fixture_id in FIXTURE_IDS
+    ]
     payload["runtime"] = {
         "backend": suite.backend,
         "grading": suite.grading,
+        "selected_env": spec.env_id,
+        "available_envs": list(FIXTURE_IDS),
         "wall_time_s": suite.wall_time_s,
         "serial_time_s": suite.serial_time_s,
         "max_parallel": suite.max_parallel,
@@ -71,6 +137,38 @@ def product_payload() -> dict[str, object]:
         },
     ]
     return payload
+
+
+def product_payload(
+    env_id: str = DEFAULT_ENV_ID,
+    grading: str = DEFAULT_GRADING,
+    *,
+    force: bool = False,
+) -> dict[str, object]:
+    """Run (and cache) the full product pipeline for the dashboard views.
+
+    Cached because the real backend spins up two sandboxes per attacker per call, which
+    must not happen on every page load. ``force=True`` (the ``/api/run`` button) re-runs.
+    If the real backend is unavailable (e.g. no Docker), fall back to the fake sandbox so
+    the dashboard still serves, and tag the runtime so the UI can say the numbers are
+    placeholders rather than silently showing 6/8.
+    """
+    with _PAYLOAD_LOCK:
+        backend = _dashboard_backend()
+        key = (backend, env_id, grading)
+        if key in _CACHED_PAYLOADS and not force:
+            return _CACHED_PAYLOADS[key]
+        try:
+            payload = _run_pipeline(backend, env_id, grading)
+        except Exception as exc:  # noqa: BLE001 - degrade to fake rather than 500 the page
+            if backend == "fake":
+                raise
+            payload = _run_pipeline("fake", env_id, grading)
+            runtime = payload.setdefault("runtime", {})
+            if isinstance(runtime, dict):
+                runtime["backend_fallback"] = f"{backend} unavailable ({exc}); showing fake numbers"
+        _CACHED_PAYLOADS[key] = payload
+        return payload
 
 
 def dashboard_asset_for_path(path: str) -> tuple[bytes, str] | None:
@@ -93,19 +191,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         if urlsplit(self.path).path == "/api/report":
-            self._send_json(product_payload())
+            env_id, grading = _request_options(self.path)
+            self._send_json(product_payload(env_id, grading))
             return
         self._send_asset(include_body=True)
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         if urlsplit(self.path).path == "/api/run":
-            self._send_json(product_payload())
+            content_length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(content_length) if content_length else b""
+            env_id, grading = _request_options(self.path, body)
+            self._send_json(product_payload(env_id, grading, force=True))
             return
         self._send_not_found(include_body=True)
 
     def do_HEAD(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         if urlsplit(self.path).path == "/api/report":
-            self._send_json(product_payload(), include_body=False)
+            env_id, grading = _request_options(self.path)
+            self._send_json(product_payload(env_id, grading), include_body=False)
             return
         self._send_asset(include_body=False)
 
